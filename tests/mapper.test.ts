@@ -221,6 +221,66 @@ describe("mapDashboard", () => {
     expect(dashboard.recommendations.some((entry) => entry.recommendationId === "ACT013")).toBe(true);
   });
 
+  it("reads a JSON inventory_status blob instead of dumping it as the headline", () => {
+    const dashboard = mapDashboard(
+      {
+        inventory_data: [
+          { product_id: "P019", name: "Patanjali Dant Kanti 100g", stock_on_hand: 60, inventory_status: "healthy" },
+          { product_id: "P020", name: "Real Fruit Juice 1L", stock_on_hand: 25, inventory_status: "healthy" },
+        ],
+        inventory_status: JSON.stringify({
+          headline: "4 SKUs at critical stockout risk; 2 SKUs dead stock",
+          ui_summary: {
+            total_skus: 20,
+            healthy_skus: 15,
+            reorder_skus: 4,
+            out_of_stock_skus: 1,
+          },
+        }),
+        availability_status: {
+          total_products: 20,
+          healthy: 15,
+          reorder_required: 4,
+          out_of_stock: 1,
+        },
+        action_summary: { pending_approval: 11, pending_procurement_value: 42814 },
+        ui_summary: { total_vendors: 10, active_vendors: 10 },
+      },
+      "M001",
+    );
+
+    expect(dashboard.brief.headline).toBe("4 SKUs at critical stockout risk; 2 SKUs dead stock");
+    expect(dashboard.kpis.inventoryHealthPercent).toBe(75);
+    expect(dashboard.kpis.itemsToRestock).toBe(4);
+    expect(dashboard.kpis.stockoutRisks).toBe(1);
+    expect(dashboard.kpis.pendingPurchases).toBe(11);
+    expect(dashboard.inventory).toHaveLength(2);
+  });
+
+  it("fills recommended quantity from po_lines when reorder is omitted", () => {
+    const inventory = mapInventoryList({
+      inventory_data: [
+        { product_id: "P001", name: "Tata Salt 1kg", stock_on_hand: 18, inventory_status: "reorder" },
+      ],
+      po_lines: [{ product_id: "P001", sku_name: "Tata Salt 1kg", qty: 105, vendor_id: "V001" }],
+    });
+
+    expect(inventory[0].recommendedQuantity).toBe(105);
+    expect(inventory[0].restockNeeded).toBe(true);
+  });
+
+  it("reads a demand_forecast object keyed by SKU", () => {
+    const inventory = mapInventoryList({
+      inventory_data: [{ product_id: "P001", name: "Tata Salt 1kg", stock_on_hand: 18, inventory_status: "reorder" }],
+      demand_forecast: {
+        method: "sales_velocity_baseline",
+        per_sku: { P001: [420, 840, 1260] },
+      },
+    });
+
+    expect(inventory[0].demandForecast30d).toBe(420);
+  });
+
   it("orders priority items by how soon they run out", () => {
     const dashboard = mapDashboard(
       {

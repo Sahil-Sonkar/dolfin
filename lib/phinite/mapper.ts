@@ -75,6 +75,33 @@ function str(source: Payload | undefined, ...keys: string[]): string | undefined
   return undefined;
 }
 
+/**
+ * Reads merchant-facing prose. Session variables sometimes store a JSON object
+ * (`{"headline":"...","ui_summary":{...}}`) in `inventory_status` — return the
+ * headline, never the raw encoding.
+ */
+function prose(source: Payload | undefined, ...keys: string[]): string | undefined {
+  if (!source) return undefined;
+  for (const key of keys) {
+    const value = decode(field(source, key));
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (trimmed) return trimmed;
+      continue;
+    }
+    const record = asRecord(value);
+    if (record) {
+      const inner = str(record, "headline", "summary", "message", "text", "answer");
+      if (inner) return inner;
+    }
+  }
+  return undefined;
+}
+
+function firstDefined<T>(...values: Array<T | undefined>): T | undefined {
+  return values.find((value) => value !== undefined);
+}
+
 function num(source: Payload | undefined, ...keys: string[]): number | undefined {
   const value = field(source, ...keys);
   if (typeof value === "number" && Number.isFinite(value)) return value;
@@ -503,22 +530,56 @@ function productNameIndex(payload: Payload): Map<string, string> {
   return names;
 }
 
+function forecastForSku(payload: Payload, productId: string): number | undefined {
+  const row = findBySku(list(payload, "demand_forecast", "demandForecast"), productId);
+  const fromRow = num(row, "forecast_30d", "forecast30d", "forecast_30d_units");
+  if (fromRow !== undefined) return fromRow;
+
+  const blob = asRecord(decode(field(payload, "demand_forecast", "demandForecast")));
+  const perSku = asRecord(field(blob, "per_sku", "perSku"));
+  if (!perSku) return undefined;
+  const series = perSku[productId];
+  if (Array.isArray(series) && typeof series[0] === "number" && Number.isFinite(series[0])) {
+    return series[0];
+  }
+  return num(asRecord(series), "forecast_30d", "forecast30d");
+}
+
+function actionForSku(payload: Payload, productId: string): Payload | undefined {
+  return list(payload, "actions").find((entry) => {
+    const details = asRecord(field(entry, "action_details", "actionDetails")) ?? {};
+    const related = asRecord(field(entry, "related_ids", "relatedIds")) ?? asRecord(field(details, "related_ids")) ?? {};
+    const id = str({ ...details, ...related, ...entry }, "product_id", "productId", "sku_id");
+    return id === productId;
+  });
+}
+
 function enrichInventory(items: InventoryResult[], payload: Payload): InventoryResult[] {
   const reorders = list(payload, "reorder_recommendation", "reorderRecommendation");
-  const forecasts = list(payload, "demand_forecast", "demandForecast");
+  const lines = list(payload, "po_lines", "poLines");
 
   return items.map((item) => {
     const reorder = findBySku(reorders, item.productId);
-    const forecast = findBySku(forecasts, item.productId);
+    const line = findBySku(lines, item.productId);
+    const action = actionForSku(payload, item.productId);
+    const details = asRecord(field(action, "action_details", "actionDetails"));
     return {
       ...item,
       recommendedQuantity:
-        item.recommendedQuantity ?? num(reorder, "recommended_reorder_qty", "recommended_quantity", "qty"),
+        item.recommendedQuantity ??
+        num(reorder, "recommended_reorder_qty", "recommended_quantity", "qty") ??
+        num(line, "qty", "quantity", "recommended_quantity") ??
+        num(details, "recommended_quantity", "quantity") ??
+        num(action, "recommended_quantity", "quantity"),
       urgency: item.urgency ?? (reorder ? urgency(reorder) : undefined),
-      reasoning: item.reasoning ?? str(reorder, "justification", "reason"),
+      reasoning:
+        item.reasoning ??
+        str(reorder, "justification", "reason") ??
+        str(details, "reason", "description") ??
+        str(action, "reason"),
       daysUntilStockout: item.daysUntilStockout ?? num(reorder, "days_of_supply", "days_until_stockout"),
-      demandForecast30d: item.demandForecast30d ?? num(forecast, "forecast_30d", "forecast30d"),
-      restockNeeded: item.restockNeeded || Boolean(reorder),
+      demandForecast30d: item.demandForecast30d ?? forecastForSku(payload, item.productId),
+      restockNeeded: item.restockNeeded || Boolean(reorder || line),
     };
   });
 }
@@ -566,7 +627,7 @@ export function mapAgentResponse(raw: unknown): AgentResponse {
     throw new PhiniteError("MALFORMED_RESPONSE", "response was not a JSON object");
   }
 
-  const message = str(
+  const message = prose(
     payload,
     "message",
     "text",
@@ -735,10 +796,14 @@ export function mapDashboard(raw: unknown, merchantId: string): DashboardData {
   const inventory = mapInventoryList(payload);
   const recommendations = mapProcurementList(payload);
 
-  const kpiPayload = asRecord(field(payload, "kpis", "kpi", "metrics", "summary", "availability_status", "action_summary"));
+  const kpiPayload = asRecord(field(payload, "kpis", "kpi", "metrics"));
   const availability = asRecord(field(payload, "availability_status", "availabilityStatus"));
   const actions = asRecord(field(payload, "action_summary", "actionSummary"));
-  const briefPayload = asRecord(field(payload, "brief", "storeBrief", "store_brief", "dailyBrief"));
+  const statusRecord = asRecord(decode(field(payload, "inventory_status", "inventoryStatus")));
+  // Nested under a JSON `inventory_status` blob — not the top-level vendor `ui_summary`.
+  const inventoryUi = asRecord(field(statusRecord, "ui_summary", "uiSummary"));
+  const briefPayload =
+    asRecord(field(payload, "brief", "storeBrief", "store_brief", "dailyBrief")) ?? statusRecord;
 
   const atRisk = inventory.filter(
     (item) => item.daysUntilStockout !== undefined && item.daysUntilStockout <= 3,
@@ -746,7 +811,10 @@ export function mapDashboard(raw: unknown, merchantId: string): DashboardData {
   const needsRestock = inventory.filter((item) => item.restockNeeded);
   const healthy = inventory.filter((item) => item.inventoryStatus === "HEALTHY");
 
-  const hasInventory = inventory.length > 0;
+  const catalogSize =
+    num(availability, "total_products", "totalProducts") ?? num(inventoryUi, "total_skus", "totalSkus");
+  const inventoryIsPartial = catalogSize !== undefined && inventory.length < catalogSize;
+  const countFromInventory = inventory.length > 0 && !inventoryIsPartial;
 
   const priorityItems = needsRestock
     .slice()
@@ -772,27 +840,40 @@ export function mapDashboard(raw: unknown, merchantId: string): DashboardData {
           ? Math.round(ratio(num(kpiPayload, "inventoryHealth", "inventory_health", "inventoryHealthPercent", "health"))! * 100)
           : availability && num(availability, "healthy") !== undefined && num(availability, "total_products", "totalProducts")
             ? Math.round((num(availability, "healthy")! / num(availability, "total_products", "totalProducts")!) * 100)
-            : hasInventory
-              ? Math.round((healthy.length / inventory.length) * 100)
-              : undefined,
-      itemsToRestock:
-        num(kpiPayload, "itemsToRestock", "items_to_restock", "restockCount", "reorder_required", "replenishment_required") ??
-        (hasInventory ? needsRestock.length : undefined),
-      stockoutRisks:
-        num(kpiPayload, "stockoutRisks", "stockout_risks", "stockoutCount") ??
-        (hasInventory ? atRisk.length : undefined),
-      pendingPurchases:
-        num(kpiPayload, "pendingPurchases", "pending_purchases", "pendingCount", "pending_approval") ??
-        (recommendations.length > 0 ? recommendations.length : undefined),
+            : inventoryUi && num(inventoryUi, "healthy_skus") !== undefined && num(inventoryUi, "total_skus")
+              ? Math.round((num(inventoryUi, "healthy_skus")! / num(inventoryUi, "total_skus")!) * 100)
+              : countFromInventory
+                ? Math.round((healthy.length / inventory.length) * 100)
+                : undefined,
+      itemsToRestock: firstDefined(
+        num(kpiPayload, "itemsToRestock", "items_to_restock", "restockCount"),
+        num(availability, "reorder_required", "replenishment_required"),
+        num(inventoryUi, "reorder_skus"),
+        countFromInventory ? needsRestock.length : undefined,
+      ),
+      stockoutRisks: firstDefined(
+        num(kpiPayload, "stockoutRisks", "stockout_risks", "stockoutCount"),
+        countFromInventory ? atRisk.length : undefined,
+        num(availability, "out_of_stock"),
+        num(inventoryUi, "out_of_stock_skus"),
+      ),
+      pendingPurchases: firstDefined(
+        num(kpiPayload, "pendingPurchases", "pending_purchases", "pendingCount"),
+        num(actions, "pending_approval"),
+        recommendations.length > 0 ? recommendations.length : undefined,
+      ),
     },
     brief: {
-      productsNeedingAttention:
-        num(briefPayload, "productsNeedingAttention", "products_needing_attention") ??
-        num(availability, "reorder_required", "replenishment_required") ??
-        (hasInventory ? needsRestock.length : undefined),
-      stockoutsWithinThreeDays:
-        num(briefPayload, "stockoutsWithinThreeDays", "stockouts_within_three_days", "stockoutRisks") ??
-        (hasInventory ? atRisk.length : undefined),
+      productsNeedingAttention: firstDefined(
+        num(briefPayload, "productsNeedingAttention", "products_needing_attention"),
+        num(availability, "reorder_required", "replenishment_required"),
+        num(inventoryUi, "reorder_skus"),
+        countFromInventory ? needsRestock.length : undefined,
+      ),
+      stockoutsWithinThreeDays: firstDefined(
+        num(briefPayload, "stockoutsWithinThreeDays", "stockouts_within_three_days", "stockoutRisks"),
+        countFromInventory ? atRisk.length : undefined,
+      ),
       readyRecommendations:
         num(briefPayload, "readyRecommendations", "ready_recommendations") ??
         num(actions, "pending_approval") ??
@@ -804,8 +885,8 @@ export function mapDashboard(raw: unknown, merchantId: string): DashboardData {
           ? recommendations.reduce((total, entry) => total + entry.totalCost, 0)
           : undefined),
       headline:
-        str(briefPayload, "headline", "summary", "message") ??
-        str(payload, "inventory_status", "request_summary", "message", "summary"),
+        prose(briefPayload, "headline", "summary", "message") ??
+        prose(payload, "inventory_status", "request_summary", "message", "summary"),
     },
     priorityItems,
     inventory,

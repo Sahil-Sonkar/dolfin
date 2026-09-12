@@ -14,6 +14,7 @@ import {
   invalidateCache,
   loadCached,
   peekCache,
+  writeCache,
 } from "@/lib/store/response-cache";
 import { PhiniteError } from "@/lib/phinite/errors";
 import {
@@ -289,10 +290,17 @@ async function cachedRead<T>(
 
 function scheduleWarm(merchantId: string): void {
   // Sequential: three parallel 40s graphs will time out a serverless isolate.
+  // Skip a surface that already has a seeded list from the dashboard run.
   void (async () => {
-    await fetchInventory(merchantId).catch(() => undefined);
-    await fetchVendors(merchantId).catch(() => undefined);
-    await fetchProcurement(merchantId).catch(() => undefined);
+    if (!peekCache(readKey("inventory", merchantId, "INVENTORY_STATUS"))) {
+      await fetchInventory(merchantId).catch(() => undefined);
+    }
+    if (!peekCache(readKey("vendor", merchantId, "VENDOR_LIST"))) {
+      await fetchVendors(merchantId).catch(() => undefined);
+    }
+    if (!peekCache(readKey("procurement", merchantId, "PROCUREMENT_RECOMMENDATIONS"))) {
+      await fetchProcurement(merchantId).catch(() => undefined);
+    }
   })();
 }
 
@@ -339,7 +347,14 @@ export async function fetchDashboard(
         message: "Summarize what needs my attention in the store today.",
         user_variables: userVariables(merchantId, { intent: "DASHBOARD_SUMMARY" }),
       });
-      return mapDashboard(raw, merchantId);
+      const data = mapDashboard(raw, merchantId);
+      seedListCache(readKey("inventory", merchantId, "INVENTORY_STATUS"), data.inventory);
+      seedListCache(
+        readKey("procurement", merchantId, "PROCUREMENT_RECOMMENDATIONS"),
+        data.recommendations,
+      );
+      seedListCache(readKey("vendor", merchantId, "VENDOR_LIST"), mapVendorList(raw));
+      return data;
     },
     options,
   );
@@ -351,6 +366,12 @@ export async function fetchDashboard(
   if (!cached && !process.env.VERCEL) scheduleWarm(merchantId);
 
   return { data: value, cached };
+}
+
+/** Replay a fuller list from a dashboard run onto the page-specific cache keys. */
+function seedListCache<T>(key: string, items: T[]): void {
+  if (items.length === 0) return;
+  writeCache(key, items, getCacheTtlMs());
 }
 
 export async function fetchInventory(

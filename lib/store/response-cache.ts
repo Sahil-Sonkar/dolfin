@@ -20,14 +20,23 @@ interface CacheStore {
   inflight: Map<string, Promise<unknown>>;
 }
 
-const globalForCache = globalThis as unknown as { __dolfinResponseCache?: CacheStore };
+/**
+ * Bump when the mapper or cache rules change so a long-lived `next dev`
+ * process drops poisoned entries (empty lists, dead-stock slices) on reload.
+ */
+const CACHE_VERSION = 3;
 
-const store: CacheStore =
-  globalForCache.__dolfinResponseCache ??
-  (globalForCache.__dolfinResponseCache = {
-    entries: new Map(),
-    inflight: new Map(),
-  });
+const globalForCache = globalThis as unknown as {
+  __dolfinResponseCache?: CacheStore;
+  __dolfinResponseCacheVersion?: number;
+};
+
+if (globalForCache.__dolfinResponseCacheVersion !== CACHE_VERSION) {
+  globalForCache.__dolfinResponseCache = { entries: new Map(), inflight: new Map() };
+  globalForCache.__dolfinResponseCacheVersion = CACHE_VERSION;
+}
+
+const store: CacheStore = globalForCache.__dolfinResponseCache!;
 
 export function cacheKey(parts: Record<string, unknown>): string {
   return JSON.stringify(parts);
@@ -43,9 +52,27 @@ export function peekCache<T>(key: string): T | undefined {
   return entry.value as T;
 }
 
-export function writeCache<T>(key: string, value: T, ttlMs: number): void {
-  if (ttlMs <= 0) return;
+/**
+ * Writes a value, unless a better list is already cached.
+ *
+ * Empty arrays are not stored: a graph that answers the wrong intent (or
+ * returns only vendor fields) would otherwise blank a page for the full TTL.
+ * A shorter list does not replace a longer one — dashboard/inventory intents
+ * often return different slices of the same catalog.
+ */
+export function writeCache<T>(key: string, value: T, ttlMs: number): T {
+  if (ttlMs <= 0) return value;
+
+  if (Array.isArray(value)) {
+    const existing = peekCache<unknown[]>(key);
+    if (Array.isArray(existing) && existing.length > value.length) {
+      return existing as T;
+    }
+    if (value.length === 0) return value;
+  }
+
   store.entries.set(key, { value, expiresAt: Date.now() + ttlMs });
+  return value;
 }
 
 export function resetCache(): void {
@@ -104,10 +131,7 @@ export async function loadCached<T>(
     revalidateTag("phinite", "max");
   }
 
-  const pending = persist(key, ttlMs, load).then((value) => {
-    writeCache(key, value, ttlMs);
-    return value;
-  });
+  const pending = persist(key, ttlMs, load).then((value) => writeCache(key, value, ttlMs));
 
   store.inflight.set(key, pending);
   try {

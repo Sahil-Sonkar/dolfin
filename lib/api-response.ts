@@ -76,6 +76,9 @@ export function cachedJson<T>(
   return NextResponse.json(body, {
     headers: {
       "Cache-Control": cacheControl,
+      // Vercel rewrites Cache-Control on serverless; these are what the CDN uses.
+      "CDN-Cache-Control": cacheControl,
+      "Vercel-CDN-Cache-Control": cacheControl,
       "X-Dolfin-Cache": cached ? "HIT" : "MISS",
     },
   });

@@ -344,8 +344,11 @@ export async function fetchDashboard(
     options,
   );
 
-  // While the merchant reads the brief, fill the other pages so the next click is instant.
-  if (!cached) scheduleWarm(merchantId);
+  // Locally, fill the other pages while the merchant reads the brief.
+  // On Vercel the isolate stays alive until those extra graph runs finish, so
+  // a 40s dashboard plus three warm-ups exceeds maxDuration and the visitor
+  // sees a 504. Let each route populate the shared Data Cache on first visit.
+  if (!cached && !process.env.VERCEL) scheduleWarm(merchantId);
 
   return { data: value, cached };
 }

@@ -1,0 +1,81 @@
+import "server-only";
+
+/**
+ * Shared route-handler plumbing.
+ *
+ * Every route funnels failures through here so that merchants only ever see the
+ * approved copy, while the underlying cause is logged server-side.
+ */
+
+import { NextResponse } from "next/server";
+import { ZodError } from "zod";
+
+import {
+  PHINITE_ERROR_MESSAGES,
+  PHINITE_ERROR_STATUS,
+  PhiniteError,
+  type ApiErrorBody,
+} from "@/lib/phinite/errors";
+
+export function errorResponse(
+  kind: ApiErrorBody["error"]["kind"],
+  message: string,
+  status: number,
+): NextResponse<ApiErrorBody> {
+  return NextResponse.json({ error: { kind, message } }, { status });
+}
+
+/**
+ * Converts a thrown error into a merchant-safe response.
+ *
+ * A Zod failure here means our own normalized model was violated, which is a
+ * malformed upstream payload from the merchant's point of view.
+ */
+export function handleRouteError(context: string, error: unknown): NextResponse<ApiErrorBody> {
+  if (error instanceof PhiniteError) {
+    console.error(`[dolfin] ${context}: ${error.kind}`, error.detail ?? "");
+    return errorResponse(
+      error.kind,
+      PHINITE_ERROR_MESSAGES[error.kind],
+      PHINITE_ERROR_STATUS[error.kind],
+    );
+  }
+
+  if (error instanceof ZodError) {
+    console.error(`[dolfin] ${context}: normalized model failed validation`, error.issues);
+    return errorResponse(
+      "MALFORMED_RESPONSE",
+      PHINITE_ERROR_MESSAGES.MALFORMED_RESPONSE,
+      PHINITE_ERROR_STATUS.MALFORMED_RESPONSE,
+    );
+  }
+
+  console.error(`[dolfin] ${context}: unexpected error`, error);
+  return errorResponse(
+    "UNREACHABLE",
+    PHINITE_ERROR_MESSAGES.UNREACHABLE,
+    PHINITE_ERROR_STATUS.UNREACHABLE,
+  );
+}
+
+export function wantsRefresh(request: Request): boolean {
+  return new URL(request.url).searchParams.get("refresh") === "1";
+}
+
+export function cachedJson<T>(body: T, cached: boolean): NextResponse<T> {
+  return NextResponse.json(body, {
+    headers: {
+      "Cache-Control": cached ? "private, max-age=120" : "private, max-age=30",
+      "X-Dolfin-Cache": cached ? "HIT" : "MISS",
+    },
+  });
+}
+
+/** Parses a JSON request body, or `null` when it is absent or unparseable. */
+export async function readJson(request: Request): Promise<unknown> {
+  try {
+    return await request.json();
+  } catch {
+    return null;
+  }
+}

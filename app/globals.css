@@ -1,0 +1,123 @@
+@import "tailwindcss";
+
+/**
+ * Dolfin design tokens.
+ *
+ * A restrained, paper-like surface palette with a single deep teal accent, so
+ * the product reads as a serious tool rather than a dashboard demo. Status
+ * colours are reserved exclusively for inventory urgency.
+ */
+
+@theme {
+  --color-canvas: oklch(98.4% 0.003 106);
+  --color-surface: oklch(100% 0 0);
+  --color-surface-muted: oklch(97% 0.004 106);
+  --color-surface-sunken: oklch(94.8% 0.005 106);
+
+  --color-line: oklch(91.5% 0.005 106);
+  --color-line-strong: oklch(85% 0.006 106);
+
+  --color-ink: oklch(21% 0.012 106);
+  --color-ink-muted: oklch(48% 0.009 106);
+  --color-ink-subtle: oklch(62% 0.008 106);
+
+  --color-accent: oklch(48% 0.093 192);
+  --color-accent-hover: oklch(42% 0.093 192);
+  --color-accent-soft: oklch(95.5% 0.022 192);
+  --color-accent-line: oklch(88% 0.04 192);
+
+  --color-critical: oklch(55% 0.19 25);
+  --color-critical-soft: oklch(96% 0.03 25);
+  --color-critical-line: oklch(88% 0.07 25);
+
+  --color-warning: oklch(64% 0.15 65);
+  --color-warning-soft: oklch(96.5% 0.04 75);
+  --color-warning-line: oklch(89% 0.08 75);
+
+  --color-positive: oklch(56% 0.11 155);
+  --color-positive-soft: oklch(96% 0.03 155);
+  --color-positive-line: oklch(88% 0.06 155);
+
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, monospace;
+
+  --radius-card: 0.875rem;
+}
+
+@layer base {
+  * {
+    border-color: var(--color-line);
+  }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    background-color: var(--color-canvas);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+  }
+
+  /* Tabular figures keep stock counts and prices from shifting as they update. */
+  .numeric {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+    border-radius: 0.25rem;
+  }
+
+  ::selection {
+    background-color: var(--color-accent-soft);
+  }
+}
+
+@layer utilities {
+  /* One shared elevation. The UI separates with lines, not shadows. */
+  .card-shadow {
+    box-shadow: 0 1px 2px oklch(21% 0.012 106 / 0.04);
+  }
+
+  @keyframes thinking-pulse {
+    0%,
+    100% {
+      opacity: 0.25;
+      transform: translateY(0);
+    }
+    50% {
+      opacity: 1;
+      transform: translateY(-2px);
+    }
+  }
+
+  .animate-thinking {
+    animation: thinking-pulse 1.2s ease-in-out infinite;
+  }
+
+  @keyframes rise {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .animate-rise {
+    animation: rise 0.28s ease-out both;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .animate-thinking,
+    .animate-rise {
+      animation: none;
+    }
+  }
+}

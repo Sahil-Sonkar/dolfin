@@ -12,6 +12,8 @@ import type { AgentResponse } from "@/lib/types";
  * message and receives a normalized `AgentResponse`.
  */
 
+export const maxDuration = 120;
+
 const AgentRequestSchema = z.object({
   message: z.string().min(1, "Message is required").max(2000),
   merchantId: z.string().min(1, "Merchant is required"),

@@ -245,7 +245,11 @@ Or paste a full URL into `PHINITE_AGENT_URL`. If that URL already contains `/ai/
 
 Runs against the current graph take roughly 15–65 seconds. Completed workflow records can disappear from the status endpoint a few seconds after `completed`, so the 3s poll interval is tight but sufficient.
 
-Successful responses are reused for `PHINITE_CACHE_TTL_MS` (default 30 minutes) so a demo can move between pages without waiting on the graph again. This is a replay of a real run, not a local dataset. Overlapping requests for the same key share one in-flight call. After the first dashboard miss, inventory, vendors and procurement are warmed in the background. Append `?refresh=1` to any GET, or set the TTL to `0`, to bypass. Approvals always hit Phinite live and then drop the dashboard / procurement / chat entries.
+Successful responses are reused for `PHINITE_CACHE_TTL_MS` (default 30 minutes) so a demo can move between pages without waiting on the graph again. This is a replay of a real run, not a local dataset.
+
+Locally that lives in memory. On Vercel the in-memory map is per serverless isolate and is empty after every cold start — which is why production stayed slow after the first deploy. Production now also writes into Next's Data Cache (`unstable_cache`) and sends `Cache-Control: public, s-maxage=1800` so the CDN can serve the same JSON to every visitor. API routes allow 120s so a sync graph run is not killed mid-flight.
+
+Overlapping requests for the same key share one in-flight call. After the first dashboard miss, inventory, vendors and procurement are warmed one after another. Append `?refresh=1` to any GET, or set the TTL to `0`, to bypass. Approvals always hit Phinite live and then drop the dashboard / procurement / chat entries.
 
 Optional specialist overrides (`PHINITE_INVENTORY_TRIGGER_ID`, `PHINITE_VENDOR_URL`, …) fall back to the store-manager trigger. One orchestrating graph is the intended setup.
 

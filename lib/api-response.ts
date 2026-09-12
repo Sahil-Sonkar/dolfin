@@ -62,10 +62,20 @@ export function wantsRefresh(request: Request): boolean {
   return new URL(request.url).searchParams.get("refresh") === "1";
 }
 
-export function cachedJson<T>(body: T, cached: boolean): NextResponse<T> {
+export function cachedJson<T>(
+  body: T,
+  cached: boolean,
+  options: { refresh?: boolean } = {},
+): NextResponse<T> {
+  // `public` + s-maxage lets Vercel's CDN hold the response. `private` was why
+  // every production visitor paid for a new 40s graph run.
+  const cacheControl = options.refresh
+    ? "no-store"
+    : "public, s-maxage=1800, stale-while-revalidate=86400";
+
   return NextResponse.json(body, {
     headers: {
-      "Cache-Control": cached ? "private, max-age=120" : "private, max-age=30",
+      "Cache-Control": cacheControl,
       "X-Dolfin-Cache": cached ? "HIT" : "MISS",
     },
   });

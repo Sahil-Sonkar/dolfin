@@ -20,6 +20,8 @@ import {
  * does not get to describe what it is approving.
  */
 
+export const maxDuration = 120;
+
 const DecisionSchema = z.object({
   recommendationId: z.string().min(1),
   approved: z.boolean(),

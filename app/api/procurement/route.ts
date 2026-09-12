@@ -3,6 +3,8 @@ import { getMerchantId } from "@/lib/config";
 import { fetchProcurement } from "@/lib/phinite/client";
 import { getDecision, listPurchaseOrders } from "@/lib/store/purchase-orders";
 
+export const maxDuration = 120;
+
 /**
  * Recommendations come from the backend; the decision each one has already
  * received comes from this application's own record.
@@ -13,7 +15,8 @@ export async function GET(request: Request) {
     new URL(request.url).searchParams.get("merchantId") ?? getMerchantId();
 
   try {
-    const { data, cached } = await fetchProcurement(merchantId, { refresh: wantsRefresh(request) });
+    const refresh = wantsRefresh(request);
+    const { data, cached } = await fetchProcurement(merchantId, { refresh });
     const recommendations = data.map((recommendation) => {
       const decision = getDecision(recommendation.recommendationId);
       if (!decision) return recommendation;
@@ -29,6 +32,7 @@ export async function GET(request: Request) {
         purchaseOrders: listPurchaseOrders(),
       },
       cached,
+      { refresh },
     );
   } catch (error) {
     return handleRouteError("GET /api/procurement", error);

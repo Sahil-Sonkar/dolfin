@@ -4,6 +4,8 @@ import { cachedJson, handleRouteError, wantsRefresh } from "@/lib/api-response";
 import { getMerchantId } from "@/lib/config";
 import { fetchInventory, fetchProduct } from "@/lib/phinite/client";
 
+export const maxDuration = 120;
+
 export async function GET(request: Request) {
   const params = new URL(request.url).searchParams;
   const merchantId = params.get("merchantId") ?? getMerchantId();
@@ -21,11 +23,11 @@ export async function GET(request: Request) {
         );
       }
 
-      return cachedJson(product, cached);
+      return cachedJson(product, cached, { refresh });
     }
 
     const { data, cached } = await fetchInventory(merchantId, { refresh });
-    return cachedJson({ inventory: data }, cached);
+    return cachedJson({ inventory: data }, cached, { refresh });
   } catch (error) {
     return handleRouteError("GET /api/inventory", error);
   }

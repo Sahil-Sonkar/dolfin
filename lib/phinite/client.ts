@@ -288,9 +288,12 @@ async function cachedRead<T>(
 }
 
 function scheduleWarm(merchantId: string): void {
-  void fetchInventory(merchantId).catch(() => undefined);
-  void fetchVendors(merchantId).catch(() => undefined);
-  void fetchProcurement(merchantId).catch(() => undefined);
+  // Sequential: three parallel 40s graphs will time out a serverless isolate.
+  void (async () => {
+    await fetchInventory(merchantId).catch(() => undefined);
+    await fetchVendors(merchantId).catch(() => undefined);
+    await fetchProcurement(merchantId).catch(() => undefined);
+  })();
 }
 
 /* -------------------------------------------------------------------------- */

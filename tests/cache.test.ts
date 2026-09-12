@@ -3,6 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const ORIGINAL_ENV = { ...process.env };
 
 function configure(overrides: Record<string, string> = {}) {
+  for (const key of Object.keys(process.env)) {
+    if (key.startsWith("PHINITE_")) delete process.env[key];
+  }
   Object.assign(process.env, {
     PHINITE_API_KEY: "test-key",
     PHINITE_WORKSPACE_ID: "ws_1",

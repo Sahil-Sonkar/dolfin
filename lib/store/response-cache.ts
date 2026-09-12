@@ -56,11 +56,33 @@ export function resetCache(): void {
 export function invalidateCache(match?: (key: string) => boolean): void {
   if (!match) {
     store.entries.clear();
-    return;
+  } else {
+    for (const key of store.entries.keys()) {
+      if (match(key)) store.entries.delete(key);
+    }
   }
-  for (const key of store.entries.keys()) {
-    if (match(key)) store.entries.delete(key);
+
+  if (process.env.VERCEL) {
+    void import("next/cache").then(({ revalidateTag }) => {
+      revalidateTag("phinite", "max");
+    });
   }
+}
+
+/**
+ * On Vercel, also persist through Next's Data Cache so every serverless
+ * instance can reuse the same graph result. The in-memory map only helps the
+ * current isolate — that is why production felt uncached after deploy.
+ */
+async function persist<T>(key: string, ttlMs: number, load: () => Promise<T>): Promise<T> {
+  if (!process.env.VERCEL || ttlMs <= 0) return load();
+
+  const { unstable_cache } = await import("next/cache");
+  const revalidate = Math.max(1, Math.round(ttlMs / 1000));
+  return unstable_cache(async () => load(), [key], {
+    revalidate,
+    tags: ["phinite"],
+  })();
 }
 
 export async function loadCached<T>(
@@ -77,7 +99,12 @@ export async function loadCached<T>(
     if (pending) return { value: (await pending) as T, cached: true };
   }
 
-  const pending = load().then((value) => {
+  if (options.refresh && process.env.VERCEL) {
+    const { revalidateTag } = await import("next/cache");
+    revalidateTag("phinite", "max");
+  }
+
+  const pending = persist(key, ttlMs, load).then((value) => {
     writeCache(key, value, ttlMs);
     return value;
   });

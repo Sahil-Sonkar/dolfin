@@ -7,7 +7,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const ORIGINAL_ENV = { ...process.env };
 
+function stripPhiniteEnv() {
+  for (const key of Object.keys(process.env)) {
+    if (key.startsWith("PHINITE_")) delete process.env[key];
+  }
+}
+
 function configure(overrides: Record<string, string> = {}) {
+  stripPhiniteEnv();
   Object.assign(process.env, {
     PHINITE_API_KEY: "test-key",
     PHINITE_WORKSPACE_ID: "ws_1",
@@ -15,6 +22,7 @@ function configure(overrides: Record<string, string> = {}) {
     PHINITE_ENVIRONMENT: "DEV",
     PHINITE_EXECUTION_MODE: "sync",
     PHINITE_TIMEOUT_MS: "2000",
+    PHINITE_CACHE_TTL_MS: "0",
     ...overrides,
   });
 }
@@ -33,6 +41,7 @@ function completedRun(payload: unknown) {
 
 beforeEach(async () => {
   process.env = { ...ORIGINAL_ENV };
+  stripPhiniteEnv();
   vi.resetModules();
   const { resetCache } = await import("@/lib/store/response-cache");
   resetCache();

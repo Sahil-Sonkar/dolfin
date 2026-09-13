@@ -206,4 +206,38 @@ describe("response cache", () => {
     expect(procurement.data[0].recommendationId).toBe("REC-1");
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+
+  it("fills procurement from a dashboard graph when that page is opened first", async () => {
+    configure();
+    const fetchMock = vi.fn().mockImplementation(async () =>
+      completedRun({
+        inventory: [{ product_id: "P1", product_name: "Salt", stock_level: 8 }],
+        vendors: [{ vendor_id: "V1", vendor_name: "Metro", reliability_score: 90, lead_time_days: 2 }],
+        recommendations: [
+          {
+            recommendation_id: "REC-1",
+            product_id: "P1",
+            product_name: "Salt",
+            quantity: 40,
+            vendor_id: "V1",
+            vendor_name: "Metro",
+            unit_cost: 10,
+            total_cost: 400,
+            lead_time_days: 2,
+            reliability_score: 0.9,
+            reason: "Low stock.",
+            status: "pending_approval",
+          },
+        ],
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { fetchProcurement } = await import("@/lib/phinite/client");
+    const procurement = await fetchProcurement("M001");
+
+    expect(procurement.data).toHaveLength(1);
+    expect(procurement.data[0].recommendationId).toBe("REC-1");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 });

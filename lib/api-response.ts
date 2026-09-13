@@ -62,16 +62,33 @@ export function wantsRefresh(request: Request): boolean {
   return new URL(request.url).searchParams.get("refresh") === "1";
 }
 
+function isEmptyCollectionPayload(body: unknown): boolean {
+  if (!body || typeof body !== "object") return false;
+  const value = body as Record<string, unknown>;
+  if (Array.isArray(value.recommendations) && value.recommendations.length === 0) return true;
+  if (Array.isArray(value.vendors) && value.vendors.length === 0) return true;
+  if (
+    Array.isArray(value.inventory) &&
+    value.recommendations === undefined &&
+    value.inventory.length === 0
+  ) {
+    return true;
+  }
+  return false;
+}
+
 export function cachedJson<T>(
   body: T,
   cached: boolean,
   options: { refresh?: boolean } = {},
 ): NextResponse<T> {
   // `public` + s-maxage lets Vercel's CDN hold the response. `private` was why
-  // every production visitor paid for a new 40s graph run.
-  const cacheControl = options.refresh
-    ? "no-store"
-    : "public, s-maxage=1800, stale-while-revalidate=86400";
+  // every production visitor paid for a new 40s graph run. Never pin an empty
+  // list — a wrong-intent graph would blank Procurement for 30 minutes.
+  const cacheControl =
+    options.refresh || isEmptyCollectionPayload(body)
+      ? "no-store"
+      : "public, s-maxage=1800, stale-while-revalidate=86400";
 
   return NextResponse.json(body, {
     headers: {

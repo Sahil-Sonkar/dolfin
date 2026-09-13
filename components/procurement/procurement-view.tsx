@@ -34,10 +34,16 @@ export function ProcurementView() {
         </h2>
 
         {status === "loading" ? (
-          <div className="grid gap-4 md:grid-cols-2">
-            {[0, 1].map((index) => (
-              <Skeleton key={index} className="h-56 rounded-[--radius-card]" />
-            ))}
+          <div className="space-y-3">
+            <p className="text-[13px] text-ink-muted">
+              Asking the Store Manager for purchase recommendations. First load can take up to a
+              minute.
+            </p>
+            <div className="grid gap-4 md:grid-cols-2">
+              {[0, 1].map((index) => (
+                <Skeleton key={index} className="h-56 rounded-[--radius-card]" />
+              ))}
+            </div>
           </div>
         ) : pending.length === 0 ? (
           <Card>

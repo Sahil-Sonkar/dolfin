@@ -24,7 +24,7 @@ interface CacheStore {
  * Bump when the mapper or cache rules change so a long-lived `next dev`
  * process drops poisoned entries (empty lists, dead-stock slices) on reload.
  */
-const CACHE_VERSION = 3;
+const CACHE_VERSION = 4;
 
 const globalForCache = globalThis as unknown as {
   __dolfinResponseCache?: CacheStore;
@@ -39,13 +39,17 @@ if (globalForCache.__dolfinResponseCacheVersion !== CACHE_VERSION) {
 const store: CacheStore = globalForCache.__dolfinResponseCache!;
 
 export function cacheKey(parts: Record<string, unknown>): string {
-  return JSON.stringify(parts);
+  return JSON.stringify({ v: CACHE_VERSION, ...parts });
+}
+
+function isEmptyList(value: unknown): boolean {
+  return Array.isArray(value) && value.length === 0;
 }
 
 export function peekCache<T>(key: string): T | undefined {
   const entry = store.entries.get(key);
   if (!entry) return undefined;
-  if (entry.expiresAt <= Date.now()) {
+  if (entry.expiresAt <= Date.now() || isEmptyList(entry.value)) {
     store.entries.delete(key);
     return undefined;
   }
@@ -106,10 +110,22 @@ async function persist<T>(key: string, ttlMs: number, load: () => Promise<T>): P
 
   const { unstable_cache } = await import("next/cache");
   const revalidate = Math.max(1, Math.round(ttlMs / 1000));
-  return unstable_cache(async () => load(), [key], {
-    revalidate,
-    tags: ["phinite"],
-  })();
+  let servedFromDataCache = true;
+  const cached = await unstable_cache(
+    async () => {
+      servedFromDataCache = false;
+      return load();
+    },
+    [key],
+    {
+      revalidate,
+      tags: ["phinite"],
+    },
+  )();
+
+  // An empty list in Data Cache is a poisoned miss (wrong intent), not a result.
+  if (servedFromDataCache && isEmptyList(cached)) return load();
+  return cached;
 }
 
 export async function loadCached<T>(

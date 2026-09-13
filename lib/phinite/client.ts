@@ -443,6 +443,16 @@ export async function fetchProcurement(
   return cachedRead(
     readKey("procurement", merchantId, "PROCUREMENT_RECOMMENDATIONS"),
     async () => {
+      // Dashboard already carries `actions` / PO lines. Reuse that run so this
+      // page does not wait on a second graph that often returns no recs.
+      const fromDashboard = peekCache<DashboardData>(
+        readKey("dashboard", merchantId, "DASHBOARD_SUMMARY"),
+      )?.recommendations;
+      if (fromDashboard && fromDashboard.length > 0) return fromDashboard;
+
+      const { data } = await fetchDashboard(merchantId, options);
+      if (data.recommendations.length > 0) return data.recommendations;
+
       const raw = await runGraph("procurement", {
         message: "List the procurement recommendations waiting for my approval.",
         user_variables: userVariables(merchantId, { intent: "PROCUREMENT_RECOMMENDATIONS" }),
